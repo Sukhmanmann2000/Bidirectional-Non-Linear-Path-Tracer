@@ -1,0 +1,70 @@
+color old_ray_color(
+    const ray& r,
+    const color& background,
+    const hittable& world,
+    shared_ptr<hittable> light_shape,
+    color lastAttenuation,
+    double** prevQtable,
+    int idxPrev,
+    int idxQ,
+    int depth
+) {
+    hit_record rec;
+
+    // If we've exceeded the ray bounce limit, no more light is gathered.
+    if (depth >= MAX_DEPTH)
+        return color(0,0,0);
+    // If the ray hits nothing, return the background color.
+    if (!world.hit(r, 0.001, infinity, rec))
+        return background;
+
+    ray scattered;
+    color attenuation;
+    color emitted = rec.mat_ptr->emitted(r, rec, rec.u, rec.v, rec.p);
+    color update;
+    double lr = 0.1;
+    int idxCurr = getClosestIndex(rec.hammersely_points,NUM_POINTS,rec.p);
+    if (depth>0){
+        if (rec.mat_ptr->islight()){
+            update = emitted;
+        }
+        else{
+            double qmax = 0;
+            for (int i=0;i<NUM_ACTIONS;i++){
+                if (rec.qtable[idxCurr][i]>qmax)
+                    qmax = rec.qtable[idxCurr][i];
+            }
+            update = lastAttenuation*qmax;
+        }
+        prevQtable[idxPrev][idxQ] = (1-lr)*prevQtable[idxPrev][idxQ] + lr*update.length();
+    }
+    double scattercdf[NUM_ACTIONS],sum=0;
+    
+    for (int i=0;i<NUM_ACTIONS;i++){
+        sum+=rec.qtable[idxCurr][i];
+        scattercdf[i]=sum;
+    }
+    double temprand = random_double()*sum;
+    for (idxQ=0;idxQ<NUM_ACTIONS;idxQ++){
+        if (temprand<=scattercdf[idxQ])
+            break;
+    }
+    double pdf_val;
+    color albedo;
+    if (!rec.mat_ptr->scatter(r, rec, albedo, scattered, pdf_val, idxQ))
+        return emitted;
+    pdf_val = (rec.qtable[idxCurr][idxQ]/sum)*NUM_ACTIONS/(2*pi);
+
+    // shared_ptr<hittable> light_shape =
+    //     make_shared<xz_rect>(213, 343, 227, 332, 554, make_shared<material>());
+    // auto p0 = make_shared<hittable_pdf>(light_shape, rec.p);
+    // auto p1 = make_shared<cosine_pdf>(rec.normal);
+    // mixture_pdf p(p0, p1);
+
+    // scattered = ray(rec.p, p.generate(), r.time());
+    // pdf_val = p.value(scattered.direction());
+    double spdf = rec.mat_ptr->scattering_pdf(r, rec, scattered);
+    attenuation = albedo * spdf;
+    
+    return attenuation* old_ray_color(scattered, background, world, light_shape, attenuation,rec.qtable,idxCurr,idxQ,depth+1)/pdf_val;
+}
